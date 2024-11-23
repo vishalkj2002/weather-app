@@ -16,7 +16,7 @@ const forecastItemsContainer = document.querySelector(
 );
 
 searchButton.addEventListener("click", () => {
-  if (cityInput.value.trim() != "") {
+  if (cityInput.value.trim() !== "") {
     updateWeatherInfo(cityInput.value);
     cityInput.value = "";
     cityInput.blur();
@@ -24,7 +24,7 @@ searchButton.addEventListener("click", () => {
 });
 
 cityInput.addEventListener("keydown", (event) => {
-  if (event.key == "Enter" && cityInput.value.trim() != "") {
+  if (event.key === "Enter" && cityInput.value.trim() !== "") {
     updateWeatherInfo(cityInput.value);
     cityInput.value = "";
     cityInput.blur();
@@ -44,7 +44,7 @@ function getWeatherIcon(id) {
   if (id <= 622) return "snow.svg";
   if (id <= 781) return "atmosphere.svg";
   if (id <= 800) return "clear.svg";
-  else return "clouds.svg";
+  return "clouds.svg";
 }
 
 function getCurrentDate() {
@@ -58,66 +58,103 @@ function getCurrentDate() {
 }
 
 async function updateWeatherInfo(city) {
-  const weatherData = await getFetchData("weather", city);
-  if (weatherData.cod != 200) {
+  try {
+    const weatherData = await getFetchData("weather", city);
+    if (weatherData.cod !== 200) {
+      showDisplaySection(notFoundSection);
+      return;
+    }
+
+    const {
+      name: country,
+      main: { temp, humidity },
+      weather: [{ id, main }],
+      wind: { speed },
+    } = weatherData;
+
+    // Update current weather
+    countryTxt.textContent = country;
+    tempTxt.textContent = `${Math.round(temp)}°C`;
+    humidityValueTxt.textContent = `${humidity}%`;
+    conditionTxt.textContent = main;
+    windValueTxt.textContent = `${speed}M/s`;
+    currentDateTxt.textContent = getCurrentDate();
+    weatherSummaryImg.src = `assets/weather/${getWeatherIcon(id)}`;
+
+    // Update forecast
+    await updateForecastsInfo(city);
+    showDisplaySection(weatherInfoSection);
+  } catch (error) {
+    console.error("Error fetching weather data:", error);
     showDisplaySection(notFoundSection);
-    return;
   }
-  const {
-    name: country,
-    main: { temp, humidity },
-    weather: [{ id, main }],
-    wind: { speed },
-  } = weatherData;
-  countryTxt.textContent = country;
-  tempTxt.textContent = Math.round(temp) + "°C";
-  humidityValueTxt.textContent = humidity + "%";
-  conditionTxt.textContent = main;
-  windValueTxt.textContent = speed + "M/s";
-  currentDateTxt.textContent = getCurrentDate();
-  weatherSummaryImg.src = `assets/weather/${getWeatherIcon(id)}`;
-  await updateForecastsInfo(city);
-  showDisplaySection(weatherInfoSection);
 }
 
 async function updateForecastsInfo(city) {
-  const forecastsData = await getFetchData("forecast", city);
-  const timeTaken = "12:00:00";
-  const todayDate = new Date().toISOString().split("T")[0];
-  forecastItemsContainer.innerHTML = "";
-  forecastsData.list.forEach((forecastWeather) => {
-    if (
-      forecastWeather.dt_txt.includes(timeTaken) &&
-      !forecastWeather.dt_txt.includes(todayDate)
-    ) {
-      updateForecastItems(forecastWeather);
-    }
-  });
-}
+  try {
+    const forecastData = await getFetchData("forecast", city);
+    if (!forecastData.list) return;
 
-function updateForecastItems(weatherData) {
-  console.log(weatherData);
-  const {
-    dt_txt: date,
-    weather: [{ id }],
-    main: { temp },
-  } = weatherData;
+    forecastItemsContainer.innerHTML = "";
+    const dailyForecasts = new Map(); // Use Map to store one forecast per day
 
-  const dateTaken = new Date(date);
-  const dateOption = {
-    day: '2-digit',
-    month: 'short'
+    // Get today's date without time
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Process forecast data
+    forecastData.list.forEach((forecast) => {
+      const forecastDate = new Date(forecast.dt * 1000);
+      forecastDate.setHours(0, 0, 0, 0);
+
+      // Skip today's forecast
+      if (forecastDate.getTime() === today.getTime()) return;
+
+      // Use date as key to avoid duplicates
+      const dateKey = forecastDate.toDateString();
+
+      // Take the noon forecast or update existing one if closer to noon
+      if (!dailyForecasts.has(dateKey)) {
+        dailyForecasts.set(dateKey, forecast);
+      } else {
+        const existingForecast = dailyForecasts.get(dateKey);
+        const existingHour = new Date(existingForecast.dt * 1000).getHours();
+        const currentHour = forecastDate.getHours();
+
+        // If this forecast is closer to noon (12:00), use it instead
+        if (Math.abs(12 - currentHour) < Math.abs(12 - existingHour)) {
+          dailyForecasts.set(dateKey, forecast);
+        }
+      }
+    });
+
+    // Take first 5 days
+    const fiveDayForecast = Array.from(dailyForecasts.values()).slice(0, 5);
+
+    // Create forecast elements
+    fiveDayForecast.forEach((forecast) => {
+      const date = new Date(forecast.dt * 1000);
+      const formattedDate = date.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+      });
+
+      const forecastItem = `
+        <div class="forecast-item">
+          <h5 class="forecast-item-date regular-txt">${formattedDate}</h5>
+          <img src="assets/weather/${getWeatherIcon(forecast.weather[0].id)}"
+               class="forecast-item-img"
+               alt="${forecast.weather[0].description}">
+          <h5 class="forecast-item-temp">${Math.round(
+            forecast.main.temp
+          )}°C</h5>
+        </div>
+      `;
+      forecastItemsContainer.insertAdjacentHTML("beforeend", forecastItem);
+    });
+  } catch (error) {
+    console.error("Error updating forecast:", error);
   }
-  const dateResult = dateTaken.toLocaleDateString('en-US', dateOption)
-
-  const forecastItem = `
-    <div class="forecast-item">
-      <h5 class="forecast-item-date regular-txt">${dateResult}</h5>
-      <img src="assets/weather/${getWeatherIcon(id)}" class="forecast-item-img">
-      <h5 class="forecast-item-temp">${Math.round(temp)}°C</h5>
-    </div>
-  `;
-  forecastItemsContainer.insertAdjacentHTML('beforeend', forecastItem)
 }
 
 function showDisplaySection(section) {
@@ -126,3 +163,6 @@ function showDisplaySection(section) {
   );
   section.style.display = "flex";
 }
+
+// Initial section display
+showDisplaySection(searchCitySection);
